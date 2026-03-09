@@ -2,6 +2,38 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Project Overview
+
+**beads-coder** is an ephemeral Docker container that takes a beads issue ID, clones a GitHub repo, uses OpenCode in headless mode to implement the story, and delivers a pull request. See README.md for full details.
+
+### Architecture
+
+The container runs 4 phases: Setup -> Code -> Question Loop -> Deliver
+
+- `entrypoint.sh` -- orchestrator, sequences all phases
+- `scripts/lib.sh` -- shared library (logging, exit codes, beads sync, EXIT trap)
+- `scripts/setup.sh` -- Phase 1: init beads DB, clone repo, claim bead
+- `scripts/run-agent.sh` -- Phase 2+3: run OpenCode headlessly, handle question/answer loop
+- `scripts/deliver.sh` -- Phase 4: commit, push, create PR, update bead
+- `container-AGENTS.md` -- template injected into workspace to instruct the coding agent
+- `container-opencode.json` -- OpenCode config with opencode-beads plugin
+- `Dockerfile` -- multi-stage build (~1.5GB image)
+
+### Beads sync
+
+Host and container communicate bead state via a Dolt remote (`BEADS_REMOTE` env var). The container does `bd dolt pull` on startup and `bd dolt push` before exit. A JSONL fallback mode is also supported (`BEADS_SYNC_MODE=jsonl`).
+
+### Key conventions
+
+- Bead descriptions must have a user story on top ("As a XXX, I want YYY so I can ZZZ") and an "Outcome" section at the bottom.
+- All scripts source `scripts/lib.sh` for shared functions.
+- Exit codes: 0=success, 1=recoverable failure, 2=config error, 3=claim conflict.
+- The container does NOT commit to its own repo -- it commits to the *target* repo's feature branch.
+
+### Open work
+
+Run `bd ready` to see available beads. The epic is `bc-f7u`.
+
 ## Quick Reference
 
 ```bash
