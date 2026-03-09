@@ -2,3 +2,9 @@
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Beads database (local only, synced via Dolt remote)
+.beads/dolt/
+
+# Node modules (if any local dev)
+node_modules/
