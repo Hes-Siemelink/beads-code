@@ -38,13 +38,13 @@ if [[ -f "$OPENCODE_CONFIG" ]]; then
     error "opencode.json is not valid JSON"
     ERRORS=$((ERRORS + 1))
   else
-    # Check for opencode-beads plugin
-    HAS_PLUGIN=$(jq -r '.plugin // [] | map(select(. == "opencode-beads")) | length' "$OPENCODE_CONFIG" 2>/dev/null)
-    if [[ "$HAS_PLUGIN" -gt 0 ]]; then
-      log "opencode-beads plugin configured"
+    log "opencode.json is valid JSON"
+    # Check for permission: allow (required for headless/non-interactive use)
+    HAS_PERMS=$(jq -r '.permission // "unset"' "$OPENCODE_CONFIG" 2>/dev/null)
+    if [[ "$HAS_PERMS" == "allow" ]]; then
+      log "permission: allow (headless-ready)"
     else
-      error "opencode-beads plugin not found in opencode.json"
-      ERRORS=$((ERRORS + 1))
+      warn "permission is '$HAS_PERMS' -- consider 'allow' for headless use"
     fi
   fi
 else

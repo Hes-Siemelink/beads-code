@@ -113,9 +113,16 @@ run_opencode() {
   # Clear any previous needs-answer signal
   rm -f "$NEEDS_ANSWER_FILE"
 
+  # Prevent interactive prompts and network calls that could hang in a container
+  export OPENCODE_DISABLE_AUTOUPDATE=1
+  export OPENCODE_DISABLE_LSP_DOWNLOAD=1
+  export OPENCODE_DISABLE_PRUNE=1
+  # Point OpenCode to our config file (it won't find it via --dir /workspace)
+  export OPENCODE_CONFIG="/app/opencode.json"
+
   log "Invoking OpenCode..."
 
-  local cmd=(opencode run "$prompt" --dir "$WORKSPACE")
+  local cmd=(opencode run "$prompt" --dir "$WORKSPACE" --print-logs)
   if [[ -n "$MODEL" ]]; then
     cmd+=(-m "$MODEL")
   fi
@@ -124,11 +131,19 @@ run_opencode() {
   log "Command: ${cmd[*]}"
   log "Timeout: ${OPENCODE_TIMEOUT}s"
 
-  # Run opencode with a timeout, tee output to log file.
-  # timeout sends SIGTERM, then SIGKILL after 30s grace period.
+  # Run opencode with a timeout. Write output to log file and stream to stderr.
+  # IMPORTANT: We avoid `timeout ... | tee` because tee keeps the pipe open
+  # after timeout kills the process, causing the pipeline to hang. Instead we
+  # redirect directly to the log file and tail it in the background for live output.
   local exit_code=0
+  : > "$OPENCODE_LOG"  # truncate log file
+  tail -f "$OPENCODE_LOG" &
+  local tail_pid=$!
   timeout --signal=TERM --kill-after=30 "$OPENCODE_TIMEOUT" \
-    "${cmd[@]}" 2>&1 | tee "$OPENCODE_LOG" || exit_code=$?
+    "${cmd[@]}" >> "$OPENCODE_LOG" 2>&1 || exit_code=$?
+  sleep 1
+  kill "$tail_pid" 2>/dev/null || true
+  wait "$tail_pid" 2>/dev/null || true
 
   if [[ "$exit_code" -eq 124 ]]; then
     warn "OpenCode timed out after ${OPENCODE_TIMEOUT}s"

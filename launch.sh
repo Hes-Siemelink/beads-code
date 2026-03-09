@@ -168,8 +168,8 @@ validate() {
   [[ -n "${GITHUB_TOKEN:-}" ]] || die "GITHUB_TOKEN must be set"
 
   # At least one LLM key
-  if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" ]]; then
-    die "At least one of ANTHROPIC_API_KEY or OPENAI_API_KEY must be set"
+  if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
+    die "At least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY must be set"
   fi
 
   # Docker available
@@ -206,7 +206,9 @@ validate() {
 push_beads() {
   log "Pushing beads to server..."
   bd dolt commit 2>&1 || true    # may say "nothing to commit"
-  DOLT_REMOTE_PASSWORD="" bd dolt push 2>&1 || {
+  # Use --force because the container's direct SQL writes leave uncommitted
+  # working set changes on the server that conflict with a normal push.
+  DOLT_REMOTE_PASSWORD="" bd dolt push --force 2>&1 || {
     die "Failed to push beads to server. Is 'origin' remote configured? Try: bd dolt remote add origin http://localhost:50051/bc"
   }
   log "Beads pushed successfully."
@@ -247,6 +249,9 @@ build_docker_cmd() {
   # Pass through LLM API keys
   [[ -n "${ANTHROPIC_API_KEY:-}" ]]  && cmd+=(-e "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY")
   [[ -n "${OPENAI_API_KEY:-}" ]]     && cmd+=(-e "OPENAI_API_KEY=$OPENAI_API_KEY")
+  [[ -n "${GEMINI_API_KEY:-}" ]]     && cmd+=(-e "GEMINI_API_KEY=$GEMINI_API_KEY" -e "GOOGLE_GENERATIVE_AI_API_KEY=$GEMINI_API_KEY")
+  [[ -n "${GOOGLE_API_KEY:-}" ]]     && cmd+=(-e "GOOGLE_API_KEY=$GOOGLE_API_KEY")
+  [[ -n "${GOOGLE_GENERATIVE_AI_API_KEY:-}" ]] && cmd+=(-e "GOOGLE_GENERATIVE_AI_API_KEY=$GOOGLE_GENERATIVE_AI_API_KEY")
 
   # Optional: model
   [[ -n "$MODEL" ]] && cmd+=(-e "MODEL=$MODEL")
