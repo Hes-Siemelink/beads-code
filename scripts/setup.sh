@@ -25,8 +25,11 @@ log "Validating environment variables..."
 require_env BEAD_ID REPO_URL GITHUB_TOKEN
 require_any_env ANTHROPIC_API_KEY OPENAI_API_KEY
 
-# BEADS_REMOTE is required for dolt mode
-if [[ "$BEADS_SYNC_MODE" == "dolt" ]]; then
+# BEADS_PROJECT_ID is required for direct SQL mode (the default)
+if [[ "${BEADS_SYNC_MODE:-direct}" == "direct" ]]; then
+  require_env BEADS_PROJECT_ID
+  log "Using direct SQL mode (server: ${BEADS_SERVER_HOST:-beads-server}:${BEADS_SERVER_PORT:-3306})"
+elif [[ "$BEADS_SYNC_MODE" == "dolt" ]]; then
   require_env BEADS_REMOTE
 fi
 
@@ -40,40 +43,79 @@ git config --global user.name "${BD_ACTOR:-beads-coder}"
 git config --global user.email "${BD_ACTOR:-beads-coder}@beads.dev"
 
 log "Configuring GitHub CLI auth..."
-echo "$GITHUB_TOKEN" | gh auth login --with-token 2>&1 || {
-  error "GitHub CLI auth failed"
-  exit "$EXIT_CONFIG_ERROR"
-}
+# When GITHUB_TOKEN env var is set, gh uses it automatically.
+# Calling 'gh auth login --with-token' would fail because gh sees the env var
+# as an active auth method. Instead, verify the token works.
+if gh auth status 2>&1; then
+  log "GitHub CLI authenticated via GITHUB_TOKEN env var."
+else
+  # Fall back to explicit login (e.g. if GITHUB_TOKEN is unset but passed another way)
+  echo "$GITHUB_TOKEN" | gh auth login --with-token 2>&1 || {
+    error "GitHub CLI auth failed"
+    exit "$EXIT_CONFIG_ERROR"
+  }
+fi
 
 # Configure git to use HTTPS with token (for clone/push)
 git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
 
 # ---------------------------------------------------------------------------
-# 3. Initialize beads and sync from remote
+# 3. Initialize beads -- connect directly to beads-server via SQL
 # ---------------------------------------------------------------------------
-log "Initializing beads database..."
-if [[ ! -d /app/.beads ]]; then
-  # Fresh init -- container's own beads DB
-  bd init --prefix "$BEADS_PREFIX" 2>&1 || {
-    error "bd init failed"
-    exit "$EXIT_FAILURE"
-  }
+# Instead of running `bd init` (which overwrites the project_id in the shared
+# database, breaking other clients), we manually create the minimal .beads/
+# configuration that tells bd how to connect to the existing server.
+#
+# Required env vars:
+#   BEADS_PROJECT_ID  - The host's project ID (must match the server's DB)
+#   BEADS_SERVER_HOST - SQL server hostname (default: beads-server)
+#   BEADS_SERVER_PORT - SQL server port (default: 3306)
+
+BEADS_SERVER_HOST="${BEADS_SERVER_HOST:-beads-server}"
+BEADS_SERVER_PORT="${BEADS_SERVER_PORT:-3306}"
+BEADS_PROJECT_ID="${BEADS_PROJECT_ID:-}"
+
+if [[ -z "$BEADS_PROJECT_ID" ]]; then
+  error "BEADS_PROJECT_ID must be set (the host's project ID from .beads/metadata.json)"
+  exit "$EXIT_CONFIG_ERROR"
 fi
 
-# Configure remote (dolt mode)
-if [[ "$BEADS_SYNC_MODE" == "dolt" ]]; then
-  log "Adding Dolt remote: $BEADS_REMOTE"
-  bd dolt remote add origin "$BEADS_REMOTE" 2>&1 || {
-    # Remote may already exist if re-running
-    warn "bd dolt remote add failed (may already exist)"
-  }
-fi
+log "Configuring beads client (server=${BEADS_SERVER_HOST}:${BEADS_SERVER_PORT}, project=${BEADS_PROJECT_ID})..."
 
-# Pull bead data
-beads_sync_pull || {
-  error "Failed to pull beads data -- cannot proceed without the bead"
-  exit "$EXIT_FAILURE"
+# Create minimal .beads directory with metadata pointing to the remote server.
+# This avoids bd init entirely -- no database writes, no project ID overwrites.
+mkdir -p /app/.beads
+
+cat > /app/.beads/metadata.json <<METAEOF
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "${BEADS_PREFIX}",
+  "project_id": "${BEADS_PROJECT_ID}",
+  "dolt_server_host": "${BEADS_SERVER_HOST}",
+  "dolt_server_port": ${BEADS_SERVER_PORT},
+  "dolt_server_user": "root",
+  "issue_prefix": "${BEADS_PREFIX}"
 }
+METAEOF
+
+# bd also reads the server port from this file
+echo -n "$BEADS_SERVER_PORT" > /app/.beads/dolt-server.port
+
+log "Beads config written to /app/.beads/metadata.json"
+
+# bd discovers .beads/ by walking up from CWD -- run verify from /app
+cd /app
+if bd show "$BEAD_ID" --json &>/dev/null; then
+  log "Connected to beads-server. Bead $BEAD_ID is accessible."
+else
+  error "Cannot connect to beads-server or bead $BEAD_ID not found."
+  error "Check BEADS_PROJECT_ID, BEADS_SERVER_HOST, BEADS_SERVER_PORT."
+  # Show what bd says for debugging
+  bd show "$BEAD_ID" --json 2>&1 || true
+  exit "$EXIT_FAILURE"
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Validate the bead exists and is workable
@@ -111,6 +153,15 @@ else
   }
 fi
 
+# Symlink .beads into workspace so bd can discover it from /workspace.
+# bd finds its config by walking up from CWD looking for .beads/ -- but
+# /workspace is not a child of /app, so without this symlink bd commands
+# fail after cd /workspace.
+if [[ ! -e "$WORKSPACE/.beads" ]]; then
+  ln -s /app/.beads "$WORKSPACE/.beads"
+  log "Symlinked $WORKSPACE/.beads -> /app/.beads"
+fi
+
 BRANCH_NAME="beads/${BEAD_ID}"
 log "Creating feature branch: $BRANCH_NAME"
 
@@ -122,13 +173,15 @@ git checkout -b "$BRANCH_NAME" "origin/${REPO_BRANCH}" 2>&1 || {
 }
 
 # ---------------------------------------------------------------------------
-# 6. Claim the bead atomically
+# 6. Claim the bead
 # ---------------------------------------------------------------------------
-log "Claiming bead $BEAD_ID..."
-if ! bd update "$BEAD_ID" --claim --json 2>&1; then
-  error "Failed to claim bead $BEAD_ID -- it may already be claimed by another agent"
-  exit "$EXIT_CLAIM_CONFLICT"
-fi
+# Set status to in_progress and assign to this actor.
+# We don't use --claim (which fails if already assigned) because the
+# launch script may have already touched the bead during validation.
+log "Claiming bead $BEAD_ID for ${BD_ACTOR}..."
+bd update "$BEAD_ID" --status in_progress --assignee "${BD_ACTOR}" --json 2>&1 || {
+  warn "Failed to update bead status/assignee (non-fatal, continuing)"
+}
 log "Bead claimed successfully."
 
 # ---------------------------------------------------------------------------

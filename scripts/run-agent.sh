@@ -25,6 +25,7 @@ MODEL="${MODEL:-}"
 OPENCODE_LOG="/tmp/opencode-output.log"
 NEEDS_ANSWER_FILE="/tmp/needs-answer"
 MAX_QUESTION_ROUNDS="${MAX_QUESTION_ROUNDS:-5}"
+OPENCODE_TIMEOUT="${OPENCODE_TIMEOUT:-1800}"   # 30 minutes default
 
 # ---------------------------------------------------------------------------
 # 1. Read bead data
@@ -121,12 +122,44 @@ run_opencode() {
   cmd+=("${extra_args[@]}")
 
   log "Command: ${cmd[*]}"
+  log "Timeout: ${OPENCODE_TIMEOUT}s"
 
-  # Run opencode, tee output to log file
+  # Run opencode with a timeout, tee output to log file.
+  # timeout sends SIGTERM, then SIGKILL after 30s grace period.
   local exit_code=0
-  "${cmd[@]}" 2>&1 | tee "$OPENCODE_LOG" || exit_code=$?
+  timeout --signal=TERM --kill-after=30 "$OPENCODE_TIMEOUT" \
+    "${cmd[@]}" 2>&1 | tee "$OPENCODE_LOG" || exit_code=$?
 
+  if [[ "$exit_code" -eq 124 ]]; then
+    warn "OpenCode timed out after ${OPENCODE_TIMEOUT}s"
+    bead_comment "$BEAD_ID" "OpenCode timed out after ${OPENCODE_TIMEOUT}s during phase $CURRENT_PHASE"
+  fi
+
+  # Post-run diagnostics
   log "OpenCode exited with code $exit_code"
+  if [[ -f "$OPENCODE_LOG" ]]; then
+    local log_lines
+    log_lines=$(wc -l < "$OPENCODE_LOG" 2>/dev/null || echo 0)
+    log "OpenCode log: $log_lines lines written to $OPENCODE_LOG"
+    if [[ "$exit_code" -ne 0 ]]; then
+      log "--- Last 20 lines of OpenCode output ---"
+      tail -20 "$OPENCODE_LOG" >&2 || true
+      log "--- End of OpenCode output ---"
+    fi
+  fi
+  # Show workspace changes so far
+  local ws_changes
+  ws_changes=$(cd "$WORKSPACE" && git diff --stat HEAD 2>/dev/null || true)
+  local ws_untracked
+  ws_untracked=$(cd "$WORKSPACE" && git ls-files --others --exclude-standard 2>/dev/null || true)
+  if [[ -n "$ws_changes" || -n "$ws_untracked" ]]; then
+    log "Workspace changes after OpenCode run:"
+    [[ -n "$ws_changes" ]]   && log "$ws_changes"
+    [[ -n "$ws_untracked" ]] && log "Untracked: $ws_untracked"
+  else
+    log "No workspace changes detected after OpenCode run."
+  fi
+
   return "$exit_code"
 }
 

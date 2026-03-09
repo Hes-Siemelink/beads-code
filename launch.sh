@@ -21,12 +21,14 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Default: container-to-container via Docker network (beads-server is the container name)
 BEADS_REMOTE_URL="${BEADS_REMOTE_URL:-http://beads-server:50051/bc}"
+BEADS_SERVER_HOST="${BEADS_SERVER_HOST:-beads-server}"
+BEADS_SERVER_PORT="${BEADS_SERVER_PORT:-3306}"
 IMAGE="beads-coder"
 MODEL="${MODEL:-}"
 BRANCH="${REPO_BRANCH:-main}"
 QUESTION_TIMEOUT="${QUESTION_TIMEOUT:-3600}"
 BD_ACTOR="${BD_ACTOR:-beads-coder}"
-SYNC_MODE="dolt"
+SYNC_MODE="direct"
 DRY_RUN=0
 
 BEAD_ID=""
@@ -59,28 +61,31 @@ Arguments:
   <repo-url>      GitHub repo URL to clone
 
 Options:
-  --remote <url>        Beads remote URL for container (default: http://beads-server:50051/bc)
-  --image <name>        Docker image name (default: beads-coder)
-  --model <model>       LLM model identifier
-  --branch <branch>     Base branch (default: main)
-  --timeout <seconds>   Question timeout (default: 3600)
-  --actor <name>        Actor name for audit trail (default: beads-coder)
-  --network <name>      Docker network to join (default: beads-server_default)
-  --dry-run             Print the docker run command without executing
-  -h, --help            Show this help message
+  --server-host <host>    Beads server hostname for container (default: beads-server)
+  --server-port <port>    Beads server SQL port for container (default: 3306)
+  --image <name>          Docker image name (default: beads-coder)
+  --model <model>         LLM model identifier
+  --branch <branch>       Base branch (default: main)
+  --timeout <seconds>     Question timeout (default: 3600)
+  --actor <name>          Actor name for audit trail (default: beads-coder)
+  --network <name>        Docker network to join (default: beads-server_default)
+  --dry-run               Print the docker run command without executing
+  -h, --help              Show this help message
 
 Environment variables (auto-detected):
   GITHUB_TOKEN          GitHub personal access token (required)
   ANTHROPIC_API_KEY     Anthropic API key (at least one LLM key required)
   OPENAI_API_KEY        OpenAI API key (at least one LLM key required)
-  BEADS_REMOTE_URL      Override remote URL for container (default: http://beads-server:50051/bc)
+  BEADS_SERVER_HOST     Override server hostname for container (default: beads-server)
+  BEADS_SERVER_PORT     Override server SQL port for container (default: 3306)
 
 Workflow:
-  1. Pushes the host's beads DB to the beads-server
+  1. Pushes the host's beads DB to the beads-server (via Dolt remote)
   2. Runs the beads-coder container on the same Docker network
-  3. Container pulls beads, implements story, pushes results
-  4. Host pulls bead updates back from the server
-  5. Prints a summary: bead status, PR URL, any questions
+  3. Container connects directly to beads-server via SQL (no clone needed)
+  4. Container implements the story and creates a PR
+  5. Host pulls bead updates back from the server
+  6. Prints a summary: bead status, PR URL, any questions
 
 Examples:
   # Basic usage
@@ -106,8 +111,11 @@ parse_args() {
       -h|--help)
         usage
         ;;
-      --remote)
-        BEADS_REMOTE_URL="$2"; shift 2
+      --server-host)
+        BEADS_SERVER_HOST="$2"; shift 2
+        ;;
+      --server-port)
+        BEADS_SERVER_PORT="$2"; shift 2
         ;;
       --image)
         IMAGE="$2"; shift 2
@@ -211,13 +219,24 @@ build_docker_cmd() {
   # The container connects to beads-server via Docker networking.
   # Use the container name (beads-server) as the hostname when on the same network,
   # or host.docker.internal when not on the beads-server network.
+  # Read the host's project ID from metadata.json to pass to the container.
+  # The container must use the same project ID -- bd init is skipped to avoid
+  # overwriting it in the shared database.
+  local host_project_id
+  host_project_id=$(jq -r '.project_id' .beads/metadata.json 2>/dev/null) || true
+  if [[ -z "$host_project_id" || "$host_project_id" == "null" ]]; then
+    die "Cannot read project_id from .beads/metadata.json"
+  fi
+
   local cmd=(
     docker run --rm
     --network "$DOCKER_NETWORK"
     -e "BEAD_ID=$BEAD_ID"
     -e "REPO_URL=$REPO_URL"
     -e "GITHUB_TOKEN=$GITHUB_TOKEN"
-    -e "BEADS_REMOTE=$BEADS_REMOTE_URL"
+    -e "BEADS_SERVER_HOST=$BEADS_SERVER_HOST"
+    -e "BEADS_SERVER_PORT=$BEADS_SERVER_PORT"
+    -e "BEADS_PROJECT_ID=$host_project_id"
     -e "DOLT_REMOTE_PASSWORD="
     -e "REPO_BRANCH=$BRANCH"
     -e "QUESTION_TIMEOUT=$QUESTION_TIMEOUT"
@@ -231,6 +250,9 @@ build_docker_cmd() {
 
   # Optional: model
   [[ -n "$MODEL" ]] && cmd+=(-e "MODEL=$MODEL")
+
+  # Optional: opencode timeout (default 1800s in container)
+  [[ -n "${OPENCODE_TIMEOUT:-}" ]] && cmd+=(-e "OPENCODE_TIMEOUT=$OPENCODE_TIMEOUT")
 
   # Image name
   cmd+=("$IMAGE")
@@ -326,7 +348,7 @@ main() {
   log "Image:   $IMAGE"
   log "Bead:    $BEAD_ID"
   log "Repo:    $REPO_URL"
-  log "Remote:  $BEADS_REMOTE_URL"
+  log "Server:  $BEADS_SERVER_HOST:$BEADS_SERVER_PORT"
   log "Network: $DOCKER_NETWORK"
   log ""
 

@@ -23,7 +23,7 @@ export EXIT_CLAIM_CONFLICT=3 # Bead already claimed by another agent
 CURRENT_PHASE="${CURRENT_PHASE:-unknown}"
 BEAD_ID="${BEAD_ID:-}"
 BEADS_REMOTE="${BEADS_REMOTE:-}"
-BEADS_SYNC_MODE="${BEADS_SYNC_MODE:-dolt}"   # "dolt" or "jsonl"
+BEADS_SYNC_MODE="${BEADS_SYNC_MODE:-direct}"  # "direct" (SQL), "dolt" (clone+push), or "jsonl"
 BEADS_JSONL_PATH="${BEADS_JSONL_PATH:-/beads-remote/beads.jsonl}"
 BEADS_PREFIX="${BEADS_PREFIX:-bc}"
 QUESTION_TIMEOUT="${QUESTION_TIMEOUT:-3600}"
@@ -77,6 +77,11 @@ require_any_env() {
 beads_sync_pull() {
   log "Pulling beads data (mode=${BEADS_SYNC_MODE})..."
   case "$BEADS_SYNC_MODE" in
+    direct)
+      # Direct SQL mode: bd is already connected to the server.
+      # No pull needed -- reads go directly to the shared database.
+      log "Direct SQL mode -- no pull needed."
+      ;;
     dolt)
       if ! bd dolt pull 2>&1; then
         warn "bd dolt pull failed (non-fatal, continuing with local data)"
@@ -105,6 +110,12 @@ beads_sync_pull() {
 beads_sync_push() {
   log "Pushing beads data (mode=${BEADS_SYNC_MODE})..."
   case "$BEADS_SYNC_MODE" in
+    direct)
+      # Direct SQL mode: bd writes go directly to the server.
+      # Commit the working set so changes are visible to other clients.
+      bd dolt commit 2>&1 || true
+      log "Direct SQL mode -- committed working set (no push needed)."
+      ;;
     dolt)
       # Must commit pending working set changes before push
       bd dolt commit 2>&1 || true
@@ -175,7 +186,9 @@ _exit_handler() {
     error "Exiting with code $exit_code (phase: $CURRENT_PHASE)"
 
     # Best-effort: update bead with failure info
-    if [[ -n "$BEAD_ID" ]]; then
+    # Guard: only attempt bd operations if the beads DB exists and is functional
+    # Try from current dir first; fall back to /app where .beads/ always lives
+    if [[ -n "$BEAD_ID" ]] && { bd show "$BEAD_ID" --json &>/dev/null || (cd /app && bd show "$BEAD_ID" --json) &>/dev/null; }; then
       local msg="Agent failed in phase '$CURRENT_PHASE' with exit code $exit_code"
       bead_comment "$BEAD_ID" "$msg"
 
@@ -196,6 +209,8 @@ _exit_handler() {
 
       # Best-effort sync
       beads_sync_push || true
+    elif [[ -n "$BEAD_ID" ]]; then
+      warn "Beads DB not initialized; skipping bead update on exit"
     fi
   fi
 }

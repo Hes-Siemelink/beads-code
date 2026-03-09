@@ -26,10 +26,12 @@ WORKSPACE="/workspace"
 log "Checking for changes in $WORKSPACE..."
 cd "$WORKSPACE"
 
-# Unstage the AGENTS.md we injected -- don't include orchestrator artifacts in the PR
-# (It may have been added to an existing file or be a new file)
+# Unstage orchestrator artifacts -- don't include them in the PR
+# AGENTS.md: injected by setup.sh for the coding agent
+# .beads: symlink to /app/.beads for bd discovery
 git checkout -- AGENTS.md 2>/dev/null || true
 git restore --staged AGENTS.md 2>/dev/null || true
+git rm --cached .beads 2>/dev/null || true
 
 DIFF_STAT=$(git diff --stat HEAD 2>/dev/null || true)
 UNTRACKED=$(git ls-files --others --exclude-standard 2>/dev/null || true)
@@ -57,13 +59,14 @@ BRANCH_NAME="beads/${BEAD_ID}"
 log "Staging all changes..."
 git add -A
 
-# Remove AGENTS.md from staging if it was added
+# Remove orchestrator artifacts from staging -- don't include in the PR
 git reset HEAD -- AGENTS.md 2>/dev/null || true
+git reset HEAD -- .beads 2>/dev/null || true
 
-# Check if there's still something to commit after unstaging AGENTS.md
+# Check if there's still something to commit after unstaging artifacts
 if git diff --cached --quiet 2>/dev/null; then
-  warn "No changes remain after excluding AGENTS.md"
-  bead_comment "$BEAD_ID" "Agent completed but produced no code changes (only AGENTS.md was modified)."
+  warn "No changes remain after excluding orchestrator artifacts"
+  bead_comment "$BEAD_ID" "Agent completed but produced no code changes (only orchestrator artifacts were modified)."
   exit "$EXIT_SUCCESS"
 fi
 

@@ -29,6 +29,25 @@ RUN ARCH="${TARGETARCH:-amd64}" && \
     chmod +x /usr/local/bin/bd
 
 # ---------------------------------------------------------------------------
+# Stage 1b: Install dolt binary
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim AS dolt-builder
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ARG DOLT_VERSION=1.83.4
+ARG TARGETARCH
+
+RUN ARCH="${TARGETARCH:-amd64}" && \
+    curl -fsSL "https://github.com/dolthub/dolt/releases/download/v${DOLT_VERSION}/dolt-linux-${ARCH}.tar.gz" \
+    | tar xz -C /tmp && \
+    cp -f /tmp/dolt-linux-${ARCH}/bin/dolt /usr/local/bin/dolt && \
+    chmod +x /usr/local/bin/dolt && \
+    rm -rf /tmp/dolt-linux-${ARCH}
+
+# ---------------------------------------------------------------------------
 # Stage 2: Main image
 # ---------------------------------------------------------------------------
 FROM node:22-slim
@@ -62,6 +81,9 @@ RUN npm install -g opencode-beads@latest
 # Copy bd binary from builder stage
 COPY --from=bd-builder /usr/local/bin/bd /usr/local/bin/bd
 
+# Copy dolt binary from builder stage (required by bd for local database)
+COPY --from=dolt-builder /usr/local/bin/dolt /usr/local/bin/dolt
+
 # ---------------------------------------------------------------------------
 # Application files
 # ---------------------------------------------------------------------------
@@ -88,20 +110,22 @@ RUN git config --system init.defaultBranch main
 
 # Environment variable documentation (not set -- must be provided at runtime)
 # Required:
-#   BEAD_ID          - Bead ID to work on
-#   REPO_URL         - GitHub repo to clone
-#   GITHUB_TOKEN     - For git + gh CLI auth
-#   BEADS_REMOTE     - Dolt remote for beads sync
+#   BEAD_ID              - Bead ID to work on
+#   REPO_URL             - GitHub repo to clone
+#   GITHUB_TOKEN         - For git + gh CLI auth
+#   BEADS_PROJECT_ID     - Host's beads project ID (from .beads/metadata.json)
 #   ANTHROPIC_API_KEY or OPENAI_API_KEY - LLM provider key
 #
 # Optional:
-#   MODEL            - Model identifier (default: provider default)
-#   QUESTION_TIMEOUT - Seconds to wait for answers (default: 3600)
-#   REPO_BRANCH      - Base branch (default: main)
-#   BD_ACTOR         - Actor name for audit trail (default: beads-coder)
-#   BEADS_SYNC_MODE  - Sync mode: "dolt" or "jsonl" (default: dolt)
-#   BEADS_PREFIX     - Beads prefix (default: bc)
-#   MAX_QUESTION_ROUNDS - Max Q&A rounds (default: 5)
+#   BEADS_SERVER_HOST    - Beads SQL server hostname (default: beads-server)
+#   BEADS_SERVER_PORT    - Beads SQL server port (default: 3306)
+#   MODEL                - Model identifier (default: provider default)
+#   QUESTION_TIMEOUT     - Seconds to wait for answers (default: 3600)
+#   REPO_BRANCH          - Base branch (default: main)
+#   BD_ACTOR             - Actor name for audit trail (default: beads-coder)
+#   BEADS_SYNC_MODE      - Sync mode: "direct" (default), "dolt", or "jsonl"
+#   BEADS_PREFIX         - Beads prefix (default: bc)
+#   MAX_QUESTION_ROUNDS  - Max Q&A rounds (default: 5)
 
 WORKDIR /workspace
 
