@@ -1,0 +1,29 @@
+# beads-server: Dolt remote for beads-coder containers
+#
+# Usage:
+#   docker compose up -d          # start server
+#   docker compose logs -f        # watch logs
+#   docker compose down           # stop server
+#   docker compose down -v        # stop + delete data
+
+services:
+  beads-server:
+    build: .
+    container_name: beads-server
+    environment:
+      - BEADS_DB_NAME=${BEADS_DB_NAME:-bc}
+    ports:
+      - "${BEADS_SQL_PORT:-3307}:3306"          # SQL (for debugging)
+      - "${BEADS_REMOTE_PORT:-50051}:50051"     # RemotesAPI (for push/pull)
+    volumes:
+      - beads-data:/var/lib/dolt
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "dolt", "version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  beads-data:
+    driver: local

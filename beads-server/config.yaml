@@ -1,0 +1,17 @@
+log_level: info
+
+behavior:
+  read_only: false
+  autocommit: true
+  dolt_transaction_commit: false
+
+listener:
+  host: 0.0.0.0
+  port: 3306
+  max_connections: 100
+
+remotesapi:
+  port: 50051
+  read_only: false
+
+data_dir: /var/lib/dolt
