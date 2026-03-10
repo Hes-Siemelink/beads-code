@@ -75,6 +75,9 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 # Install OpenCode globally
 RUN npm install -g opencode-ai@latest
 
+# Install AI SDK provider for custom/local models (Docker Model Runner, Ollama, etc.)
+RUN npm install -g @ai-sdk/openai-compatible@latest
+
 # Install opencode-beads plugin (pre-cache so it's available at runtime)
 RUN npm install -g opencode-beads@latest
 
@@ -114,7 +117,7 @@ RUN git config --system init.defaultBranch main
 #   REPO_URL             - GitHub repo to clone
 #   GITHUB_TOKEN         - For git + gh CLI auth
 #   BEADS_PROJECT_ID     - Host's beads project ID (from .beads/metadata.json)
-#   ANTHROPIC_API_KEY or OPENAI_API_KEY - LLM provider key
+#   ANTHROPIC_API_KEY or OPENAI_API_KEY - LLM provider key (not needed for Docker Model Runner)
 #
 # Optional:
 #   BEADS_SERVER_HOST    - Beads SQL server hostname (default: beads-server)

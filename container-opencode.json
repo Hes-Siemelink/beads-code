@@ -1,4 +1,30 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "permission": "allow"
+  "permission": "allow",
+  "provider": {
+    "docker-model-runner": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Docker Model Runner (local)",
+      "options": {
+        "baseURL": "http://model-runner.docker.internal/engines/v1",
+        "apiKey": "none"
+      },
+      "models": {
+        "ai/qwen3-coder": {
+          "name": "Qwen3 Coder 30B-A3B (local)",
+          "limit": {
+            "context": 32000,
+            "output": 8192
+          }
+        },
+        "ai/llama3.2": {
+          "name": "Llama 3.2 (local)",
+          "limit": {
+            "context": 32000,
+            "output": 4096
+          }
+        }
+      }
+    }
+  }
 }

@@ -74,10 +74,19 @@ Options:
 
 Environment variables (auto-detected):
   GITHUB_TOKEN          GitHub personal access token (required)
-  ANTHROPIC_API_KEY     Anthropic API key (at least one LLM key required)
-  OPENAI_API_KEY        OpenAI API key (at least one LLM key required)
+  ANTHROPIC_API_KEY     Anthropic API key (at least one LLM key required*)
+  OPENAI_API_KEY        OpenAI API key (at least one LLM key required*)
   BEADS_SERVER_HOST     Override server hostname for container (default: beads-server)
   BEADS_SERVER_PORT     Override server SQL port for container (default: 3306)
+
+  * No API key needed when using Docker Model Runner (--model docker-model-runner/...)
+
+Docker Model Runner (local LLM):
+  # Run with a local model via Docker Model Runner (no API keys needed)
+  ./launch.sh bc-42 https://github.com/your-org/your-repo --model docker-model-runner/ai/qwen3-coder
+  
+  # Configure context size for your model (run once, persists):
+  docker model configure ai/qwen3-coder -- --ctx-size 32768
 
 Workflow:
   1. Pushes the host's beads DB to the beads-server (via Dolt remote)
@@ -167,9 +176,14 @@ validate() {
   # Required env vars
   [[ -n "${GITHUB_TOKEN:-}" ]] || die "GITHUB_TOKEN must be set"
 
-  # At least one LLM key
-  if [[ -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
-    die "At least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY must be set"
+  # At least one LLM key -- OR a Docker Model Runner model (no key needed)
+  local using_local_model=0
+  if [[ "$MODEL" == docker-model-runner/* ]]; then
+    using_local_model=1
+    log "Using Docker Model Runner model: $MODEL (no API key needed)"
+  fi
+  if [[ "$using_local_model" -eq 0 && -z "${ANTHROPIC_API_KEY:-}" && -z "${OPENAI_API_KEY:-}" && -z "${GEMINI_API_KEY:-}" && -z "${GOOGLE_API_KEY:-}" ]]; then
+    die "At least one of ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or GOOGLE_API_KEY must be set (or use --model docker-model-runner/... for local models)"
   fi
 
   # Docker available
@@ -258,6 +272,9 @@ build_docker_cmd() {
 
   # Optional: opencode timeout (default 1800s in container)
   [[ -n "${OPENCODE_TIMEOUT:-}" ]] && cmd+=(-e "OPENCODE_TIMEOUT=$OPENCODE_TIMEOUT")
+
+  # Optional: opencode log level (default WARN in container; DEBUG/INFO/WARN/ERROR)
+  [[ -n "${OPENCODE_LOG_LEVEL:-}" ]] && cmd+=(-e "OPENCODE_LOG_LEVEL=$OPENCODE_LOG_LEVEL")
 
   # Image name
   cmd+=("$IMAGE")

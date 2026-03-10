@@ -26,6 +26,7 @@ OPENCODE_LOG="/tmp/opencode-output.log"
 NEEDS_ANSWER_FILE="/tmp/needs-answer"
 MAX_QUESTION_ROUNDS="${MAX_QUESTION_ROUNDS:-5}"
 OPENCODE_TIMEOUT="${OPENCODE_TIMEOUT:-1800}"   # 30 minutes default
+OPENCODE_LOG_LEVEL="${OPENCODE_LOG_LEVEL:-WARN}" # WARN filters noisy bus/permission events
 
 # ---------------------------------------------------------------------------
 # 1. Read bead data
@@ -122,7 +123,11 @@ run_opencode() {
 
   log "Invoking OpenCode..."
 
-  local cmd=(opencode run "$prompt" --dir "$WORKSPACE" --print-logs)
+  # --print-logs sends internal logs to stderr; --log-level filters them.
+  # WARN level suppresses noisy bus/permission/snapshot events while keeping
+  # important warnings and errors.  The default formatted stdout still shows
+  # tool calls, text output, and agent reasoning.
+  local cmd=(opencode run "$prompt" --dir "$WORKSPACE" --print-logs --log-level "$OPENCODE_LOG_LEVEL")
   if [[ -n "$MODEL" ]]; then
     cmd+=(-m "$MODEL")
   fi

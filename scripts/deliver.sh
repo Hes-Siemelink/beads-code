@@ -114,16 +114,50 @@ EOF
 )
 
 log "Creating pull request..."
-PR_URL=$(gh pr create \
+
+# Extract owner/repo from REPO_URL for REST API fallback
+# Handles: https://github.com/owner/repo, https://github.com/owner/repo.git
+REPO_SLUG=$(echo "$REPO_URL" | sed 's|\.git$||' | sed -E 's|.*/([^/]+/[^/]+)$|\1|')
+
+# Try gh CLI first; if it fails (e.g. SAML/SSO on fork parent), fall back to REST API
+PR_OUTPUT=$(gh pr create \
   --title "$PR_TITLE" \
   --body "$PR_BODY" \
   --base "$REPO_BRANCH" \
   --head "$BRANCH_NAME" \
   2>&1) || {
-  error "gh pr create failed"
-  bead_comment "$BEAD_ID" "Agent pushed branch $BRANCH_NAME but failed to create PR"
-  exit "$EXIT_FAILURE"
+  warn "gh pr create failed: $PR_OUTPUT"
+  log "Falling back to GitHub REST API for PR creation..."
+
+  # Build JSON payload (use jq to handle special characters in title/body)
+  PR_JSON=$(jq -n \
+    --arg title "$PR_TITLE" \
+    --arg body "$PR_BODY" \
+    --arg head "$BRANCH_NAME" \
+    --arg base "$REPO_BRANCH" \
+    '{title: $title, body: $body, head: $head, base: $base}')
+
+  API_RESPONSE=$(curl -sS -X POST \
+    -H "Authorization: token ${GITHUB_TOKEN}" \
+    -H "Accept: application/vnd.github+json" \
+    "https://api.github.com/repos/${REPO_SLUG}/pulls" \
+    -d "$PR_JSON" 2>&1) || {
+    error "REST API PR creation also failed: $API_RESPONSE"
+    bead_comment "$BEAD_ID" "Agent pushed branch $BRANCH_NAME but failed to create PR via both gh CLI and REST API"
+    exit "$EXIT_FAILURE"
+  }
+
+  PR_OUTPUT=$(echo "$API_RESPONSE" | jq -r '.html_url // empty')
+  if [[ -z "$PR_OUTPUT" ]]; then
+    API_MSG=$(echo "$API_RESPONSE" | jq -r '.message // "unknown error"')
+    API_ERRORS=$(echo "$API_RESPONSE" | jq -r '.errors // [] | map(.message) | join(", ")')
+    error "REST API PR creation failed: $API_MSG${API_ERRORS:+ ($API_ERRORS)}"
+    bead_comment "$BEAD_ID" "Agent pushed branch $BRANCH_NAME but failed to create PR: $API_MSG"
+    exit "$EXIT_FAILURE"
+  fi
+  log "PR created via REST API fallback"
 }
+PR_URL="$PR_OUTPUT"
 
 log "PR created: $PR_URL"
 
