@@ -75,12 +75,13 @@ PROMPT="${PROMPT}
 
 ## Instructions
 
-1. Read the AGENTS.md file in this workspace for project-specific guidance.
-2. Implement the changes described in the story above.
-3. Run any available tests to verify your work.
-4. If you are blocked and need human input, follow the question protocol in AGENTS.md.
-5. Do NOT commit or push -- the orchestrator handles that.
-6. When done, simply exit."
+Implement the changes now. Start coding immediately -- do not write plans or status reports.
+
+1. Implement the changes described in the story above.
+2. Run any available tests to verify your work.
+3. Do NOT commit or push -- the orchestrator handles that.
+4. Do NOT run any bd commands -- the beads CLI is not available here.
+5. When done, simply exit."
 
 log "Prompt composed (${#PROMPT} chars)"
 

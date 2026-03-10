@@ -157,6 +157,13 @@ fi
 # bd finds its config by walking up from CWD looking for .beads/ -- but
 # /workspace is not a child of /app, so without this symlink bd commands
 # fail after cd /workspace.
+# If the cloned repo already has a .beads/ directory (from the repo owner's
+# local setup), replace it -- the repo's config points to a different server
+# and will cause confusing errors inside the container.
+if [[ -e "$WORKSPACE/.beads" && ! -L "$WORKSPACE/.beads" ]]; then
+  log "Removing existing .beads/ directory from workspace (repo-local config, not valid in container)"
+  rm -rf "$WORKSPACE/.beads"
+fi
 if [[ ! -e "$WORKSPACE/.beads" ]]; then
   ln -s /app/.beads "$WORKSPACE/.beads"
   log "Symlinked $WORKSPACE/.beads -> /app/.beads"
