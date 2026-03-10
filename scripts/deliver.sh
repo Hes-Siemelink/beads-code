@@ -174,14 +174,15 @@ bead_comment "$BEAD_ID" "Pull request created: $PR_URL"
 log "Creating review-request bead..."
 REVIEW_BEAD=$(bd create "Review: ${BEAD_TITLE}" \
   --description="PR ready for review: ${PR_URL}\n\nParent bead: ${BEAD_ID}" \
-  -t task -p 2 --parent "$BEAD_ID" --json 2>/dev/null) || {
-  warn "Failed to create review bead (non-fatal)"
-}
+  -t task -p 2 --parent "$BEAD_ID" --json 2>/dev/null) || true
 
 if [[ -n "$REVIEW_BEAD" ]]; then
-  REVIEW_ID=$(echo "$REVIEW_BEAD" | jq -r '.[0].id // empty')
+  # bd create --json may return an array or object; handle both
+  REVIEW_ID=$(echo "$REVIEW_BEAD" | jq -r 'if type == "array" then .[0].id else .id end // empty' 2>/dev/null) || true
   if [[ -n "$REVIEW_ID" ]]; then
     log "Review bead created: $REVIEW_ID"
+  else
+    warn "Review bead created but could not extract ID (non-fatal)"
   fi
 fi
 

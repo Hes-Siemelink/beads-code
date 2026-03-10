@@ -75,13 +75,16 @@ PROMPT="${PROMPT}
 
 ## Instructions
 
-Implement the changes now. Start coding immediately -- do not write plans or status reports.
+Implement the changes now. Do not write plans, status reports, or summaries.
+IMPORTANT: Do NOT output sections like "## Goal", "## Discoveries", "## Accomplished", or "Continue if you have next steps". These waste context. Just use tools and edit files silently.
 
-1. Implement the changes described in the story above.
-2. Run any available tests to verify your work.
-3. Do NOT commit or push -- the orchestrator handles that.
-4. Do NOT run any bd commands -- the beads CLI is not available here.
-5. When done, simply exit."
+1. First, use the Glob tool to find all relevant files. Then use the Read tool to open each one.
+2. For each file, use the Edit tool to make the required changes. You MUST edit files -- do not skip any.
+3. If a file already partially meets the criteria, find and fix the remaining gaps.
+4. After editing all files, run any available tests to verify your work.
+5. Do NOT commit or push -- the orchestrator handles that.
+6. Do NOT run any bd commands.
+7. When done, simply exit."
 
 log "Prompt composed (${#PROMPT} chars)"
 

@@ -16,6 +16,8 @@ Implement the changes described in the user story and acceptance criteria from y
 
 ### DO
 - Start implementing immediately -- do not plan extensively or write status reports.
+- **Open and read EVERY relevant file** before deciding whether changes are needed. Do not assume a file is fine based on a few samples.
+- **Make edits.** If a file already partially meets the criteria, find and fix the gaps. Never conclude "already done" without thorough verification of every file.
 - Write clean, well-tested code that satisfies the acceptance criteria.
 - Run the project's test suite if one exists (`npm test`, `pytest`, `cargo test`, `make test`, etc.).
 - Run linters/formatters if configured in the project.
@@ -28,6 +30,8 @@ Implement the changes described in the user story and acceptance criteria from y
 - **Do NOT modify `.beads/` configuration files.**
 - **Do NOT run any `bd` commands** -- the beads CLI is not available in the workspace context.
 - **Do NOT generate structured status reports** (Goal/Instructions/Discoveries/Accomplished sections). Just do the work.
+- **Do NOT output "Continue if you have next steps"** -- this wastes context tokens. Just keep working or exit when done.
+- **Do NOT re-read files you have already read** -- keep working through them sequentially.
 
 ## Quality Checklist
 
